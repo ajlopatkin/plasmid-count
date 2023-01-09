@@ -58,10 +58,10 @@ def build_overlap_matrix(blast_results):
 
 
 # files
-basedir = "/Users/gregory.wood/Documents/GitHub/plasmidCount"
-file_dirs = ["full_genomes/flat_genomes_121022", "full_genomes/longreads"]
+basedir = "/path/to/top/level"
+file_dirs = ["genomes/short", "genomes/long"]
 read_type = ["short", "long"]
-output_dir = "/Users/gregory.wood/Documents/GitHub/plasmidCount/output_full"
+output_dir = "/path/to/output"
 tmp_path = os.path.join(output_dir, "tmp_dir")
 
 # parameters
@@ -188,7 +188,7 @@ if do_plasfinder:
                 if isinstance(org_l2, str):
                     if k != "Gram Positive":
                         with open("plasmidfinder_results.csv", "a") as f:
-                            f.write(f"{filename},no plasmid found,n/a,n/a,1000,1000,0,0,0,0,0,0,0,0,1000000,1000000")
+                            f.write(f"{filename},{filetype},no plasmid found,n/a,n/a,1000,1000,0,0,0,0,0,0,1000000,1000000,1000000")
                             f.write("\n")
                     continue
                 hits = org_l2.keys()
@@ -246,11 +246,14 @@ df_raw.drop_duplicates(subset=['filename',  'contig', 'plasmid_accession', 'plas
 if filter_std:
     strains_to_filter = df_raw.assign(counts=1)[['filename', 'counts']].groupby(['filename']).count()
     strains_to_filter = list(strains_to_filter.loc[strains_to_filter["counts"] > num_contig_thresh].index)
-    all_files = df_raw.groupby('filename')['contig_len']
+    all_files = df_raw.loc[df_raw['plasmid_name'] != "no plasmid found"].groupby('filename')['contig_len']
     contig_means = all_files.transform('mean')
     contig_stds = all_files.transform('std')
     m = df_raw['contig_len'].lt(contig_means.sub(contig_stds.mul(1)))
-    contigs_to_drop = df_raw[(df_raw['contig_len'] < blast_len_thresh) & (df_raw["filename"].isin(strains_to_filter)) & m].index
+    contigs_to_drop = df_raw[(df_raw['contig_len'] < blast_len_thresh)
+                             & (df_raw["filename"].isin(strains_to_filter))
+                             & (df_raw['plasmid_name'] != "no plasmid found")
+                             & m].index
     df_raw.drop(contigs_to_drop, inplace=True)
 
 # group the resulting dataframe by filename and contig, collapsing contigs with >1 replicon to a single line
@@ -479,6 +482,22 @@ final_count_df = (grouped_df[['filename']]
                    .groupby(['filename'])
                    .agg({'counts': 'sum'})
                    .reset_index())
+
+all_dirs = [os.path.join(basedir, x) for x in file_dirs]
+files_in_df = [x for x in list(grouped_df["filename"].unique())]
+for d in all_dirs:
+    all_files = [os.path.join(d, x) for x in os.listdir(d) if (x.split(".")[-1] == "fasta")]
+    missing_files = [x for x in all_files if (x not in files_in_df) and ("plasmid.fasta" not in x)]
+    for f in missing_files:
+        new_row = {'filename': f,
+                   'file_type': 'n/a',
+                   'contig': 'n/a',
+                   'contig_len': 1000000,
+                   'plasmid_name': 'no plasmid found',
+                   'plasmid_accession': 'n/a',
+                   'blast_plasmids': []}
+        grouped_df = pd.concat([grouped_df, pd.DataFrame([new_row])])
+
 
 # write the outputs
 grouped_df.to_csv(os.path.join(output_dir, "plasmidcount_results.csv"))
