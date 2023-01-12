@@ -27,5 +27,5 @@ Filtering and Processing
 Usage:
 1. Install the `plasmidcount` Conda environment using `conda create -f plasmidcount.yml`
 2. Activate the environment using `conda activate plasmidcount`
-3. Update the following parameters above
+3. Update the parameters above as necessary
 4. Navigate to the folder containing `plasmidcount.py` and run the script
