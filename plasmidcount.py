@@ -7,6 +7,8 @@ import time
 import pandas as pd
 import numpy as np
 from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
 from Bio.Blast.Applications import NcbiblastnCommandline, NcbimakeblastdbCommandline
 from collections import OrderedDict
 
@@ -410,8 +412,9 @@ for index, row in grouped_df.iterrows():
                           inplace=True)
 
             # get unique hits and insert them into the dataframe
-            unique_hits = blast_df["seqID"].unique()
-            grouped_df.at[index, "blast_plasmids"] = list(unique_hits)
+            blast_df.drop_duplicates(subset=['seqID'], inplace=True)
+            unique_hits = dict(zip(list(blast_df["seqID"]), list(blast_df["pctId"])))
+            grouped_df.at[index, "blast_plasmids"] = unique_hits
 
             # remove temp blast files
             if os.path.isfile(tmp_fna):
@@ -431,7 +434,7 @@ for filename in list(grouped_df["filename"].unique()):
                         & (grouped_df["blast_plasmids"].apply(lambda x: len(x)) > 1)]
 
     # all plasmids contains a list of lists with blast results for each contig
-    all_plasmids = [list(x) for x in tmp_df["blast_plasmids"]]
+    all_plasmids = [list(x.keys()) for x in tmp_df["blast_plasmids"]]
     if len(all_plasmids) < 2:
         continue
 
@@ -473,7 +476,58 @@ for filename in list(grouped_df["filename"].unique()):
         grouped_df.drop(index=key_idx, inplace=True)
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-# stage 5: cleanup & output
+# stage 5: generate multi-fastas
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+print("Writing combined contig multi-fastas...")
+unique_files = list(grouped_df["filename"].unique())
+combined_fasta_dir = os.path.join(output_dir, "combined_fastas")
+if not os.path.isdir(combined_fasta_dir):
+    os.mkdir(combined_fasta_dir)
+
+for file in unique_files:
+    base_file = file.split("/")[-1].split(".fasta")[0]
+    target_file = base_file + "_plasmidcontigs.fasta"
+    out = os.path.join(combined_fasta_dir, target_file)
+
+    filtered_df = grouped_df[grouped_df["filename"] == file]
+    raw_fasta = list(SeqIO.parse(file, "fasta"))
+    full_seq = []
+
+    for index, row in filtered_df.iterrows():
+        contigs = row.contig.split("|")
+        seq_to_add = Seq("")
+        header = f"sample={base_file}; contigs={row.contig}; replicons={row.plasmid_name}; contig_len="
+        for contig in contigs:
+            curr_fasta = [x for x in raw_fasta if x.name == contig][0]
+            seq_to_add += curr_fasta.seq
+            header += f"{len(curr_fasta.seq)}|"
+
+        full_seq.append(SeqRecord(seq_to_add,
+                                  id=header.rstrip("|"),
+                                  name=header.rstrip("|"),
+                                  description=""))
+    SeqIO.write(full_seq, out, "fasta")
+
+print("Writing combined PLSdb multi-fastas...")
+combined_plsdb_dir = os.path.join(output_dir, "combined_plsdb")
+if not os.path.isdir(combined_plsdb_dir):
+    os.mkdir(combined_plsdb_dir)
+
+for file in unique_files:
+    full_plsdb = SeqIO.parse(plsdb_fna, "fasta")
+    base_file = file.split("/")[-1].split(".fasta")[0]
+    target_file = base_file + "_allplsdb.fasta"
+    out = os.path.join(combined_plsdb_dir, target_file)
+
+    plas_id_cutoff = 99.5
+    filtered_df = grouped_df[grouped_df["filename"] == file]
+    all_plasmids = [x for d in filtered_df["blast_plasmids"] for x in d.keys() if d[x] > plas_id_cutoff]
+    plas_seqs = [f for f in full_plsdb if f.id in all_plasmids]
+    SeqIO.write(plas_seqs, out, "fasta")
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# cleanup & output
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 # final_count_df contains all files and the count of distinct plasmids on each
@@ -483,6 +537,7 @@ final_count_df = (grouped_df[['filename']]
                    .agg({'counts': 'sum'})
                    .reset_index())
 
+# add lines for any samples that did not have plasmids
 all_dirs = [os.path.join(basedir, x) for x in file_dirs]
 files_in_df = [x for x in list(grouped_df["filename"].unique())]
 for d in all_dirs:
@@ -498,7 +553,6 @@ for d in all_dirs:
                    'blast_plasmids': []}
         grouped_df = pd.concat([grouped_df, pd.DataFrame([new_row])])
 
-
 # write the outputs
-grouped_df.to_csv(os.path.join(output_dir, "plasmidcount_results.csv"))
+grouped_df.drop(labels="blast_plasmids", axis=1).to_csv(os.path.join(output_dir, "plasmidcount_results.csv"))
 final_count_df.to_csv(os.path.join(output_dir, "plasmidcount_aggregated.csv"))
