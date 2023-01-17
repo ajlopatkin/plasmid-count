@@ -189,7 +189,7 @@ if do_plasfinder:
                 org_l2 = org[kk]
                 if isinstance(org_l2, str):
                     if k != "Gram Positive":
-                        with open("plasmidfinder_results.csv", "a") as f:
+                        with open(pfinder_result_path, "a") as f:
                             f.write(f"{filename},{filetype},no plasmid found,n/a,n/a,1000,1000,0,0,0,0,0,0,1000000,1000000,1000000")
                             f.write("\n")
                     continue
@@ -413,7 +413,10 @@ for index, row in grouped_df.iterrows():
 
             # get unique hits and insert them into the dataframe
             blast_df.drop_duplicates(subset=['seqID'], inplace=True)
-            unique_hits = dict(zip(list(blast_df["seqID"]), list(blast_df["pctId"])))
+            unique_hits = list(blast_df["seqID"])
+            if not blast_df.empty:
+                top_hit = blast_df.sort_values(by=["pctId", "length"], ascending=False).reset_index()["seqID"][0]
+                grouped_df.at[index, "top_hit"] = top_hit
             grouped_df.at[index, "blast_plasmids"] = unique_hits
 
             # remove temp blast files
@@ -434,7 +437,7 @@ for filename in list(grouped_df["filename"].unique()):
                         & (grouped_df["blast_plasmids"].apply(lambda x: len(x)) > 1)]
 
     # all plasmids contains a list of lists with blast results for each contig
-    all_plasmids = [list(x.keys()) for x in tmp_df["blast_plasmids"]]
+    all_plasmids = [x for x in tmp_df["blast_plasmids"]]
     if len(all_plasmids) < 2:
         continue
 
@@ -499,6 +502,8 @@ for file in unique_files:
         seq_to_add = Seq("")
         header = f"sample={base_file}; contigs={row.contig}; replicons={row.plasmid_name}; contig_len="
         for contig in contigs:
+            if contig == 'nan':
+                continue
             curr_fasta = [x for x in raw_fasta if x.name == contig][0]
             seq_to_add += curr_fasta.seq
             header += f"{len(curr_fasta.seq)}|"
@@ -520,9 +525,8 @@ for file in unique_files:
     target_file = base_file + "_allplsdb.fasta"
     out = os.path.join(combined_plsdb_dir, target_file)
 
-    plas_id_cutoff = 99.5
     filtered_df = grouped_df[grouped_df["filename"] == file]
-    all_plasmids = [x for d in filtered_df["blast_plasmids"] for x in d.keys() if d[x] > plas_id_cutoff]
+    all_plasmids = [x for x in filtered_df["top_hit"]]
     plas_seqs = [f for f in full_plsdb if f.id in all_plasmids]
     SeqIO.write(plas_seqs, out, "fasta")
 
