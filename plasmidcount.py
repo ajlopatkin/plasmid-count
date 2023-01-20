@@ -64,6 +64,7 @@ basedir = "/path/to/top/level"
 file_dirs = ["genomes/short", "genomes/long"]
 read_type = ["short", "long"]
 output_dir = "/path/to/output"
+db_path = "/path/to/plasmid/db"
 tmp_path = os.path.join(output_dir, "tmp_dir")
 
 # parameters
@@ -373,11 +374,10 @@ if not similarity_df.empty:
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 # make the blast DB if it doesn't exist
-plsdb_path = os.path.join(basedir, "db")
-plsdb_fna = os.path.join(plsdb_path, "plsdb.fna")
-if not os.path.isfile(os.path.join(plsdb_path, "plsdb.fna.nhr")):
+plsdb_fna = os.path.join(db_path, "plsdb.fna")
+if not os.path.isfile(os.path.join(db_path, "plsdb.fna.nhr")):
     print("Creating PLSdb database...")
-    cline = NcbimakeblastdbCommandline(dbtype="nucl", input_file=os.path.join(basedir, plsdb_fna))
+    cline = NcbimakeblastdbCommandline(dbtype="nucl", input_file=plsdb_fna)
     cline()
 
 # for each row in grouped df, get all the records in the corresponding fasta
